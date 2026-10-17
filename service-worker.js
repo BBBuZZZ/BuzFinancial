@@ -1,42 +1,34 @@
-// Service worker de BuZfinance: cachea la app la primera vez que se abre online,
-// y a partir de ahí la sirve desde caché aunque no haya conexión.
-const CACHE_NAME = 'buzfinance-cache-v1';
-const ARCHIVOS = [
-  './',
-  './index.html',
-  './manifest.json',
-  './icon-192.png',
-  './icon-512.png',
-  './icon-512-maskable.png'
-];
+// Service worker de BuZfinance (v2)
+// Estrategia: primero red, y si no hay conexión, lo guardado en caché.
+// Así, cuando subes una versión nueva a GitHub, la app la coge sola al abrirla con internet,
+// y sin internet sigue funcionando con la última copia guardada.
+const CACHE_NAME = 'buzfinance-cache-v2';
+const ARCHIVOS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './icon-512-maskable.png'];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ARCHIVOS)).catch(()=>{})
-  );
+  event.waitUntil(caches.open(CACHE_NAME).then((c) => c.addAll(ARCHIVOS)).catch(() => {}));
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((nombres) =>
-      Promise.all(nombres.filter(n => n !== CACHE_NAME).map(n => caches.delete(n)))
-    )
+    caches.keys().then((nombres) => Promise.all(nombres.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n))))
   );
   self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  // Las peticiones a otros sitios (cotizaciones, fuentes...) no se tocan
+  if (url.origin !== self.location.origin) return;
   event.respondWith(
-    caches.match(event.request).then((respuestaCache) => {
-      return respuestaCache || fetch(event.request).then((respuestaRed) => {
-        // guarda una copia fresca en caché para la próxima vez, si es de nuestro propio origen
-        if(event.request.url.startsWith(self.location.origin)){
-          const copia = respuestaRed.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copia));
-        }
-        return respuestaRed;
-      }).catch(() => respuestaCache);
-    })
+    fetch(event.request)
+      .then((resp) => {
+        const copia = resp.clone();
+        caches.open(CACHE_NAME).then((c) => c.put(event.request, copia));
+        return resp;
+      })
+      .catch(() => caches.match(event.request).then((r) => r || caches.match('./index.html')))
   );
 });
